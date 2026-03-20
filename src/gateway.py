@@ -1,15 +1,34 @@
+import os
 import uuid
+import json
 import numpy as np
 from typing import Optional
 from dotenv import load_dotenv
 from google import genai
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from architect import architect_app, ArchitectState
+from architect import architect_app, ArchitectState, provision_notion_workspace
 from pydantic import BaseModel
+from supabase import create_client, Client
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 load_dotenv()
+
+# ---------------------------------------------------------
+# INITIALIZE SUPABASE ADMIN CLIENT
+# We use the Service Role Key here to bypass RLS, because 
+# the Python server acts as the absolute system admin.
+# ---------------------------------------------------------
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    raise ValueError("Missing Supabase Environment Variables in Python.")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
 client = genai.Client()
+
 app = FastAPI()
 
 app.add_middleware(
@@ -20,146 +39,200 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# A mocked database storing previous OS architectures and their vector embeddings
-vector_cache_db = [] 
-
-# In production, this would be a Redis database or PostgreSQL (Supabase).
-# For now, we use an in-memory dictionary to track our AI jobs.
-jobs_db = {}
+# Initialize the embedding model
+embeddings_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 class ClientRequest(BaseModel):
+    portal_id: str
     client_name: str
     client_url: Optional[str] = None  # NEW: URL to scrape 
     client_request: str
+    notion_token: str  # NEW: Notion API token
+    base_page_id: str
 
 # ---------------------------------------------------------
 # THE BACKGROUND WORKER
 # ---------------------------------------------------------
-def run_langgraph_agent(job_id: str, request_data: ClientRequest):
-    """This function runs invisibly in the background."""
-    
-    # Initialize the LangGraph state for this specific client
-    initial_state: ArchitectState = {
-        "client_name": request_data.client_name,
-        "client_url": request_data.client_url or "",  # Use empty string if no URL provided
-        "client_request": request_data.client_request,
-        "business_context": "",
-        "current_schema": "",
-        "review_feedback": "",
-        "iteration_count": 0,
-        "final_approval": False,
-        "deployment_status": ""
-    }
+def run_langgraph_agent(portal_id: str, request_data: ClientRequest):
+    """
+    Runs LangGraph, checks the vector cache, and writes the final result to Supabase.
+    Engineered with defensive data validation for production.
+    """
+    print(f"[INIT] Booting OS Generation for Portal ID: {portal_id}")
     
     try:
-        # Update status to processing
-        jobs_db[job_id]["status"] = "processing"
+        # ---------------------------------------------------------
+        # PRE-FLIGHT CHECK 1: Validate Portal & Agency Identity
+        # ---------------------------------------------------------
+        portal_record = supabase.table("active_portals").select("agency_id").eq("id", portal_id).maybe_single().execute()
         
-        # Execute the Graph (This takes 20+ seconds)
-        final_state = architect_app.invoke(initial_state)
+        # Guard clause: Ensure data exists and is a dictionary
+        if not portal_record or not portal_record.data or not isinstance(portal_record.data, dict):
+            raise ValueError(f"Database Error: Could not locate a valid active portal for ID {portal_id}.")
+            
+        agency_id = portal_record.data.get("agency_id")
+        if not agency_id:
+            raise ValueError("Data Integrity Error: Portal record exists but is missing an associated agency_id.")
+
+        # ---------------------------------------------------------
+        # PRE-FLIGHT CHECK 2: Validate Notion Integrations
+        # ---------------------------------------------------------
+        integration_record = supabase.table("agency_integrations").select("base_notion_page_id").eq("agency_id", agency_id).maybe_single().execute()
         
-        # Save the results
-        jobs_db[job_id]["status"] = "completed"
-        jobs_db[job_id]["result"] = final_state
+        if not integration_record or not integration_record.data or not isinstance(integration_record.data, dict):
+            raise ValueError("Integration Error: Agency has not connected their Notion account.")
+            
+        base_page_id = integration_record.data.get("base_notion_page_id")
+        if not base_page_id:
+            raise ValueError("Configuration Error: Agency has not set a Master Notion Page URL in Settings.")
+
+        # ---------------------------------------------------------
+        # EXECUTION PHASE 1: Semantic Caching
+        # ---------------------------------------------------------
+        print("🔍 [SYSTEM] Checking Semantic Cache for identical previous architectures...")
+        cached_schema = check_semantic_cache(request_data.client_request)
+
+        if cached_schema:
+            print("⚡ [CACHE HIT] Bypassing LangGraph. Fast-tracking deployment...")
+            
+            # Execute tool directly
+            result_msg = provision_notion_workspace.invoke({
+                "client_name": request_data.client_name,
+                "schema_json": cached_schema,
+                "notion_token": request_data.notion_token,
+                "base_page_id": base_page_id
+            })
+            
+        else:
+            # ---------------------------------------------------------
+            # EXECUTION PHASE 2: LangGraph Orchestration
+            # ---------------------------------------------------------
+            print("[CACHE MISS] Booting LangGraph Agents for full compute...")
+            initial_state: ArchitectState = {
+                "portal_id": portal_id,
+                "notion_token": request_data.notion_token,
+                "base_page_id": f"{base_page_id}", 
+                "client_name": request_data.client_name,
+                "client_url": request_data.client_url or "",
+                "client_request": request_data.client_request,
+                "business_context": "",
+                "current_schema": "",
+                "review_feedback": "",
+                "iteration_count": 0,
+                "final_approval": False,
+                "deployment_status": "",
+                "live_notion_url": ""
+            }
+            
+            # Execute the Graph
+            final_state = architect_app.invoke(initial_state)
+            
+            if not final_state.get("final_approval"):
+                raise RuntimeError("Graph Error: Agents failed to achieve architectural approval after maximum iterations.")
+            
+            # Archive the new intelligence
+            save_to_semantic_cache(request_data.client_request, final_state["current_schema"])
+            
+            result_msg = final_state.get("deployment_status", "Deployed successfully.")
+            
+        # ---------------------------------------------------------
+        # POST-FLIGHT: Extract URL and Update Database
+        # ---------------------------------------------------------
+        # Safely parse the live Notion URL from the tool's success message
+        live_url = "#"
+        if isinstance(result_msg, str) and "Live URL: " in result_msg:
+            live_url = result_msg.split("Live URL: ")[-1].strip()
+
+        # Final Database Commit
+        supabase.table("active_portals").update({
+            "status": "active",
+            "deployment_status": "Deployed successfully.",
+            "live_notion_url": live_url
+        }).eq("id", portal_id).execute()
+        
+        print(f"[SUCCESS] Portal provisioned and DB updated for {portal_id}")
         
     except Exception as e:
-        jobs_db[job_id]["status"] = "failed"
-        jobs_db[job_id]["error"] = str(e)
-
-
-def get_embedding(text: str) -> list[float]:
-    """Converts text into an array of numbers representing its semantic meaning."""
-    # Using Gemini's embedding model
-    result = client.models.embed_content(
-        model="text-embedding-004",
-        contents=text
-    )
-
-    embeddings = getattr(result, "embeddings", None)
-    if embeddings:
-        first = embeddings[0]
-        values = getattr(first, "values", None)
-        if values is not None:
-            return values
-        if isinstance(first, dict) and "values" in first:
-            return first["values"]
-
-    data = getattr(result, "data", None)
-    if isinstance(data, list) and data:
-        first = data[0]
-        if isinstance(first, dict):
-            if "embedding" in first:
-                return first["embedding"]
-            if "values" in first:
-                return first["values"]
-
-    embedding_attr = getattr(result, "embedding", None)
-    if embedding_attr is not None:
-        return embedding_attr
-
-    raise ValueError("Unable to parse embedding from model response")
-
-def cosine_similarity(vec1, vec2):
-    """Measures how similar two vectors are (returns 0.0 to 1.0)"""
-    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
-
-# ---------------------------------------------------------
-# THE NEW OPTIMIZED INTAKE ROUTE
-# ---------------------------------------------------------
-@app.post("/api/generate-os-optimized")
-async def start_generation_with_cache(req: ClientRequest, background_tasks: BackgroundTasks):
-    
-    # 1. Convert the user's request into a vector
-    current_request_vector = get_embedding(req.client_request)
-    
-    # 2. Check the cache for semantic matches
-    for cached_item in vector_cache_db:
-        similarity_score = cosine_similarity(current_request_vector, cached_item["vector"])
+        # ---------------------------------------------------------
+        # GLOBAL FALLBACK: Graceful Failure Handling
+        # ---------------------------------------------------------
+        error_message = str(e)
+        print(f"[FATAL EXCEPTION] {error_message}")
         
-        # 3. If it is 95% similar to a past request, BYPASS THE AI
-        if similarity_score >= 0.95:
-            print(f"♻️ CACHE HIT! Similarity: {similarity_score}. Bypassing LangGraph.")
-            
-            # Immediately trigger the Executor node (Notion API) with the cached schema
-            # We save 20 seconds of graph looping and 100% of the LLM generation costs.
-            return {
-                "status": "completed_from_cache", 
-                "schema": cached_item["schema"],
-                "message": "Provisioned instantly from semantic cache."
-            }
+        # Ensure we always update the UI to stop the loading state
+        try:
+            supabase.table("active_portals").update({
+                "status": "failed",
+                "deployment_status": f"System Error: {error_message}"
+            }).eq("id", portal_id).execute()
+            print("[RECOVERY] Database successfully updated to 'failed' state.")
+        except Exception as db_fallback_error:
+            print(f"[CATASTROPHIC] Failed to update database with error state: {db_fallback_error}")
 
-    # 4. If no match is found, proceed with the expensive LangGraph background job
-    print("🧠 CACHE MISS. Booting up LangGraph Agents...")
-    job_id = str(uuid.uuid4())
-    jobs_db[job_id] = {"status": "pending", "result": None}
-    background_tasks.add_task(run_langgraph_agent, job_id, req)
-    
-    return {"job_id": job_id, "message": "Graph execution started."}
+def check_semantic_cache(client_request: str) -> str | None:
+    """
+    Checks Supabase for a semantically identical previous request.
+    Returns the cached JSON schema if a 95%+ match is found.
+    """
+    try:
+        # Convert the new request into a mathematical vector
+        query_vector = embeddings_model.embed_query(client_request)
+        
+        # Query Supabase using the RPC (Remote Procedure Call) we just created
+        response = supabase.rpc(
+            "match_cached_schema",
+            {
+                "query_embedding": query_vector,
+                "match_threshold": 0.95, # 95% similarity required to trigger a cache hit
+                "match_count": 1
+            }
+        ).execute()
+        
+        # Strictly validate the data type before interacting with it
+        data = response.data
+        
+        if isinstance(data, list) and len(data) > 0:
+            first_match = data[0]
+            
+            # Ensure the item inside the list is actually a dictionary
+            if isinstance(first_match, dict):
+                similarity = first_match.get('similarity', 0)
+                print(f"[CACHE HIT] Similarity: {similarity}")
+                
+                schema = first_match.get('schema_json')
+                if schema:
+                    return f"{schema}"
+            
+        print("CACHE MISS. Routing to LangGraph Planner...")
+        return None
+        
+    except Exception as e:
+        print(f"Cache check failed: {e}")
+        return None # Fail gracefully and let the AI generate it from scratch
+
+def save_to_semantic_cache(client_request: str, schema_json: str):
+    """
+    Saves a newly generated and approved schema back to the database.
+    """
+    try:
+        vector = embeddings_model.embed_query(client_request)
+        supabase.table("semantic_cache").insert({
+            "original_request": client_request,
+            "schema_json": schema_json,
+            "embedding": vector
+        }).execute()
+        print("New architecture saved to Semantic Cache.")
+    except Exception as e:
+        print(f"Failed to save to cache: {e}")
 
 # ---------------------------------------------------------
-# ROUTE 1: INTAKE (Returns instantly)
+# ROUTE 1: INTAKE ROUTE
+# Returns instantly
 # ---------------------------------------------------------
 @app.post("/api/generate-os")
 async def start_generation(req: ClientRequest, background_tasks: BackgroundTasks):
-    # Generate a unique tracking ID for this execution
-    job_id = str(uuid.uuid4())
-    
-    # Initialize the job in our database
-    jobs_db[job_id] = {"status": "pending", "result": None}
-    
     # Hand the heavy lifting off to FastAPI's background thread
-    background_tasks.add_task(run_langgraph_agent, job_id, req)
+    background_tasks.add_task(run_langgraph_agent, req.portal_id, req)
     
     # Return the ID to Next.js immediately so the UI doesn't freeze
-    return {"job_id": job_id, "message": "Graph execution started in background."}
-
-
-# ---------------------------------------------------------
-# ROUTE 2: THE STATUS CHECKER
-# ---------------------------------------------------------
-@app.get("/api/status/{job_id}")
-async def check_status(job_id: str):
-    if job_id not in jobs_db:
-        raise HTTPException(status_code=404, detail="Job not found")
-        
-    return jobs_db[job_id]
+    return {"portal_id": req.portal_id, "message": "Graph execution started in background."}
