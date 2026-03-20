@@ -1,5 +1,6 @@
 import uuid
 import numpy as np
+from typing import Optional
 from dotenv import load_dotenv
 from google import genai
 from fastapi import FastAPI, BackgroundTasks, HTTPException
@@ -28,7 +29,7 @@ jobs_db = {}
 
 class ClientRequest(BaseModel):
     client_name: str
-    client_url: str
+    client_url: Optional[str] = None  # NEW: URL to scrape 
     client_request: str
 
 # ---------------------------------------------------------
@@ -40,7 +41,7 @@ def run_langgraph_agent(job_id: str, request_data: ClientRequest):
     # Initialize the LangGraph state for this specific client
     initial_state: ArchitectState = {
         "client_name": request_data.client_name,
-        "client_url": request_data.client_url,
+        "client_url": request_data.client_url or "",  # Use empty string if no URL provided
         "client_request": request_data.client_request,
         "business_context": "",
         "current_schema": "",
