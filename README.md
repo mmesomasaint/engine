@@ -1,6 +1,3 @@
-### 2. The Backend README (`optima-engine/README.md`)
-
-```markdown
 # 🧠 Optima Engine: LangGraph AI Orchestrator
 
 The autonomous Python backend for Optima Logic. This engine translates natural language business requests into highly structured, relational Notion architectures. It features multi-agent QA loops, a two-pass deployment system, and mathematical semantic caching to completely bypass LLM compute costs on repeat queries.
@@ -27,16 +24,16 @@ The autonomous Python backend for Optima Logic. This engine translates natural l
 
 2. **Install Dependencies**
    ```bash
-    pip install -r requirements.txt
+   pip install -r requirements.txt
 
 3. **Environment Variables**
-    Create a .env file in the root directory. Never commit this file.
-    ```bash
-    SUPABASE_URL=your_supabase_project_url
-    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_key # Bypasses RLS
-    GOOGLE_API_KEY=your_gemini_api_key
+   Create a .env file in the root directory. Never commit this file.
+   ```bash
+   SUPABASE_URL=your_supabase_project_url
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_key # Bypasses RLS
+   GOOGLE_API_KEY=your_gemini_api_key
 
 4. **Run The Server**
-    Run the server
-    ```bash
-    uvicorn gateway:app --reload --port 8000
+   Run the server
+   ```bash
+   uvicorn gateway:app --reload --port 8000
