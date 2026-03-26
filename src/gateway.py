@@ -2,7 +2,7 @@ import os
 import uuid
 import json
 import numpy as np
-from typing import Optional
+from typing import Optional, Union
 from dotenv import load_dotenv
 from google import genai
 from fastapi import FastAPI, BackgroundTasks, HTTPException
@@ -40,10 +40,10 @@ app.add_middleware(
 )
 
 # Initialize the embedding model
-embeddings_model = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+embeddings_model = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 
 class ClientRequest(BaseModel):
-    portal_id: str
+    portal_id: Union[str, int]
     client_name: str
     client_url: Optional[str] = None  # NEW: URL to scrape 
     client_request: str
@@ -89,19 +89,27 @@ def run_langgraph_agent(portal_id: str, request_data: ClientRequest):
         # ---------------------------------------------------------
         # EXECUTION PHASE 1: Semantic Caching
         # ---------------------------------------------------------
-        print("🔍 [SYSTEM] Checking Semantic Cache for identical previous architectures...")
+        print("[SYSTEM] Checking Semantic Cache for identical previous architectures...")
         cached_schema = check_semantic_cache(request_data.client_request)
 
         if cached_schema:
-            print("⚡ [CACHE HIT] Bypassing LangGraph. Fast-tracking deployment...")
+            print("[CACHE HIT] Bypassing LangGraph. Fast-tracking deployment...")
             
-            # Execute tool directly
-            result_msg = provision_notion_workspace.invoke({
+            # This now returns my TypedDict!
+            result_payload = provision_notion_workspace.invoke({
                 "client_name": request_data.client_name,
                 "schema_json": cached_schema,
                 "notion_token": request_data.notion_token,
                 "base_page_id": base_page_id
             })
+            
+            if isinstance(result_payload, dict):
+                deployment_msg = result_payload.get("message", "Deployed via Cache")
+                live_url = result_payload.get("live_notion_url") or "#"
+            else:
+                # Extract the link from the raw string
+                deployment_msg = str(result_payload)
+                live_url = deployment_msg.split("Live URL: ")[-1].strip() if "Live URL: " in deployment_msg else "#"
             
         else:
             # ---------------------------------------------------------
@@ -133,24 +141,31 @@ def run_langgraph_agent(portal_id: str, request_data: ClientRequest):
             # Archive the new intelligence
             save_to_semantic_cache(request_data.client_request, final_state["current_schema"])
             
-            result_msg = final_state.get("deployment_status", "Deployed successfully.")
+            # The LangGraph executor node should ideally be passing your TypedDict to the state
+            deployment_data = final_state.get("deployment_status", {})
+            
+            # Defensively check if the node gave us your TypedDict or a string fallback
+            if isinstance(deployment_data, dict):
+                deployment_msg = deployment_data.get("message", "Deployed successfully.")
+                live_url = deployment_data.get("live_notion_url") or "#"
+            else:
+                deployment_msg = str(deployment_data)
+                # Rescue the URL from the flattened string using Python string splitting
+                if "Live URL: " in deployment_msg:
+                    live_url = deployment_msg.split("Live URL: ")[-1].strip()
+                else:
+                    live_url = "#"
             
         # ---------------------------------------------------------
         # POST-FLIGHT: Extract URL and Update Database
         # ---------------------------------------------------------
-        # Safely parse the live Notion URL from the tool's success message
-        live_url = "#"
-        if isinstance(result_msg, str) and "Live URL: " in result_msg:
-            live_url = result_msg.split("Live URL: ")[-1].strip()
-
-        # Final Database Commit
         supabase.table("active_portals").update({
             "status": "active",
-            "deployment_status": "Deployed successfully.",
+            "deployment_status": deployment_msg,
             "live_notion_url": live_url
         }).eq("id", portal_id).execute()
         
-        print(f"[SUCCESS] Portal provisioned and DB updated for {portal_id}")
+        print(f"✅ [SUCCESS] Portal provisioned and DB updated for {portal_id}")
         
     except Exception as e:
         # ---------------------------------------------------------
@@ -232,7 +247,7 @@ def save_to_semantic_cache(client_request: str, schema_json: str):
 @app.post("/api/generate-os")
 async def start_generation(req: ClientRequest, background_tasks: BackgroundTasks):
     # Hand the heavy lifting off to FastAPI's background thread
-    background_tasks.add_task(run_langgraph_agent, req.portal_id, req)
+    background_tasks.add_task(run_langgraph_agent, f"{req.portal_id}", req)
     
     # Return the ID to Next.js immediately so the UI doesn't freeze
     return {"portal_id": req.portal_id, "message": "Graph execution started in background."}
