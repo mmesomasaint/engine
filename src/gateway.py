@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from google import genai
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from architect import architect_app, ArchitectState, provision_notion_workspace
+from src.architect import architect_app, ArchitectState, provision_notion_workspace
 from pydantic import BaseModel
 from supabase import create_client, Client
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -33,7 +33,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000", "https://optima-portals.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

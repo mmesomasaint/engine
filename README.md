@@ -36,4 +36,4 @@ The autonomous Python backend for Optima Logic. This engine translates natural l
 4. **Run The Server**
    Run the server
    ```bash
-   uvicorn gateway:app --reload --port 8000
+   uvicorn src.gateway:app --reload --port 8000
