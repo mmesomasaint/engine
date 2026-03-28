@@ -257,5 +257,5 @@ async def start_generation(req: ClientRequest, background_tasks: BackgroundTasks
 # Keep server active
 #---------------------------------------------------------
 @app.get("/api/")
-async def test_entry(req: ClientRequest):
+async def test_entry():
     return {"message": "Gateway is up and running!"}
