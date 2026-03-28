@@ -251,3 +251,11 @@ async def start_generation(req: ClientRequest, background_tasks: BackgroundTasks
     
     # Return the ID to Next.js immediately so the UI doesn't freeze
     return {"portal_id": req.portal_id, "message": "Graph execution started in background."}
+
+#---------------------------------------------------------
+# NEW ROUTE: TEST ROUTE
+# Keep server active
+#---------------------------------------------------------
+@app.get("/api/")
+async def test_entry(req: ClientRequest):
+    return {"message": "Gateway is up and running!"}
