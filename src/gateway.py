@@ -23,7 +23,6 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000", 
         "https://crispy-journey-4p4r5vp97g7376p9-3000.app.github.dev", 
         "https://optima-portals-six.vercel.app", 
         "https://portal.optimalogic.studio"
