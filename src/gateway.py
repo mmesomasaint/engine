@@ -123,3 +123,8 @@ def run_langgraph_agent(brief_id: str) -> None:
 async def start_generation(payload: WebhookPayload, background_tasks: BackgroundTasks) -> Dict[str, str]:
     background_tasks.add_task(run_langgraph_agent, payload.brief_id)
     return {"status": "Processing Engine Pipeline", "brief_id": payload.brief_id}
+
+# Health Check Endpoint
+@app.get("/api/")
+async def test_entry():
+    return {"message": "Gateway is up and running!"}
