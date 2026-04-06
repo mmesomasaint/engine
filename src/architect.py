@@ -39,69 +39,94 @@ class ExecutionResult(TypedDict):
 def provision_notion_workspace(client_name: str, schema_json: str, notion_token: str, base_page_id: str) -> ExecutionResult:
     """Executes API calls to Notion to build a custom workspace."""
     print(f"[SYSTEM ACTION] Provisioning Notion OS for {client_name}...")
-    headers = {
+    headers: Dict[str, str] = {
         "Authorization": f"Bearer {notion_token}",
         "Content-Type": "application/json",
         "Notion-Version": "2022-06-28"
     }
+    
     try:
-        architecture = json.loads(schema_json)
+        architecture: Dict[str, Any] = cast(Dict[str, Any], json.loads(schema_json))
         
-        # Build Dashboard Page
-        dashboard_payload = {
+        # 1. Build Dashboard Page (STRICT RICH TEXT FIX)
+        dashboard_payload: Dict[str, Any] = {
             "parent": {"type": "page_id", "page_id": base_page_id},
-            "properties": {"title": [{"text": {"content": f"{client_name} - Optima OS"}}]}
+            "properties": {
+                "title": {
+                    "title": [
+                        {
+                            "type": "text",
+                            "text": {"content": f"{client_name} - Optima OS"}
+                        }
+                    ]
+                }
+            }
         }
-        res = requests.post("https://api.notion.com/v1/pages", headers=headers, json=dashboard_payload)
+        res: requests.Response = requests.post("https://api.notion.com/v1/pages", headers=headers, json=dashboard_payload)
         res.raise_for_status()
-        dashboard_id = res.json()["id"]
-        dashboard_url = res.json()["url"]
         
-        db_list = architecture.get("databases", []) if isinstance(architecture, dict) else architecture
-        if not isinstance(db_list, list) or len(db_list) == 0:
+        response_data: Dict[str, Any] = res.json()
+        dashboard_id: str = response_data.get("id", "")
+        dashboard_url: str = response_data.get("url", "")
+        
+        db_list: List[Dict[str, Any]] = architecture.get("databases", [])
+        if not db_list:
             raise ValueError("AI generated an empty or invalid database list.")
 
-        db_name_to_real_id = {}
-        pending_relations = []
+        db_name_to_real_id: Dict[str, str] = {}
+        pending_relations: List[Dict[str, str]] = []
 
         # PASS 1: Build base databases
         for db in db_list:
-            db_name = db.get("name", "Untitled")
-            clean_properties = {}
-            for prop_name, prop_val in db.get("properties", {}).items():
-                if "relation" in prop_val:
-                    pending_relations.append({
-                        "source_db_name": db_name,
-                        "prop_name": prop_name,
-                        "target_db_name": prop_val["relation"].get("database_id")
-                    })
+            # Fallback defensively in case the AI uses "title" instead of "name"
+            db_name: str = str(db.get("name", db.get("title", "Core Architecture DB")))
+            clean_properties: Dict[str, Any] = {}
+            db_props: Dict[str, Any] = db.get("properties", {})
+            
+            for prop_name, prop_val in db_props.items():
+                if isinstance(prop_val, dict) and "relation" in prop_val:
+                    relation_data = prop_val.get("relation", {})
+                    if isinstance(relation_data, dict):
+                        pending_relations.append({
+                            "source_db_name": db_name,
+                            "prop_name": prop_name,
+                            "target_db_name": relation_data.get("database_id", "")
+                        })
                 else:
                     clean_properties[prop_name] = prop_val
             
-            db_payload = {
+            # 2. Build Database (STRICT RICH TEXT FIX)
+            db_payload: Dict[str, Any] = {
                 "parent": {"type": "page_id", "page_id": dashboard_id},
-                "title": [{"text": {"content": db_name}}],
+                "title": [
+                    {
+                        "type": "text",
+                        "text": {"content": db_name}
+                    }
+                ],
                 "properties": clean_properties 
             }
-            db_res = requests.post("https://api.notion.com/v1/databases", headers=headers, json=db_payload)
+            db_res: requests.Response = requests.post("https://api.notion.com/v1/databases", headers=headers, json=db_payload)
             db_res.raise_for_status() 
-            db_name_to_real_id[db_name] = db_res.json()["id"]
+            db_name_to_real_id[db_name] = db_res.json().get("id", "")
 
         # PASS 2: Build Relations
         for rel in pending_relations:
-            source_id = db_name_to_real_id.get(rel["source_db_name"])
-            target_id = db_name_to_real_id.get(rel["target_db_name"])
+            source_id: Optional[str] = db_name_to_real_id.get(rel["source_db_name"])
+            target_id: Optional[str] = db_name_to_real_id.get(rel["target_db_name"])
+            
             if source_id and target_id:
-                patch_payload = {
+                patch_payload: Dict[str, Any] = {
                     "properties": {
                         rel["prop_name"]: {
                             "relation": {"database_id": target_id, "single_property": {}}
                         }
                     }
                 }
-                requests.patch(f"https://api.notion.com/v1/databases/{source_id}", headers=headers, json=patch_payload).raise_for_status()
+                patch_res: requests.Response = requests.patch(f"https://api.notion.com/v1/databases/{source_id}", headers=headers, json=patch_payload)
+                patch_res.raise_for_status()
 
-        return {"success": True, "message": "Successfully built.", "live_notion_url": dashboard_url}
+        return {"success": True, "message": "Successfully built and mapped architecture.", "live_notion_url": dashboard_url}
         
     except Exception as e:
         print(f"[NOTION EXECUTOR SYSTEM ERROR]: {str(e)}")
