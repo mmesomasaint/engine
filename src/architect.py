@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from dotenv import load_dotenv 
-from typing import TypedDict
+from typing import TypedDict, Dict, Any
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
