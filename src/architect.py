@@ -36,7 +36,6 @@ class ExecutionResult(TypedDict):
 # THE NOTION TOOL
 # ---------------------------------------------------------
 def provision_notion_workspace(client_name: str, schema_json: str, notion_token: str, base_page_id: str) -> ExecutionResult:
-    """Executes API calls to Notion to build a custom workspace."""
     print(f"[SYSTEM ACTION] Provisioning Notion OS for {client_name}...")
     headers: Dict[str, str] = {
         "Authorization": f"Bearer {notion_token}",
@@ -45,9 +44,19 @@ def provision_notion_workspace(client_name: str, schema_json: str, notion_token:
     }
     
     try:
-        architecture: Dict[str, Any] = cast(Dict[str, Any], json.loads(schema_json))
+        parsed_json = json.loads(schema_json)
+        db_list: List[Dict[str, Any]] = []
         
-        # 1. Build Dashboard Page (STRICT RICH TEXT FIX)
+        # Safely handle whether the AI returned an array [] or an object {}
+        if isinstance(parsed_json, list):
+            db_list = parsed_json
+        elif isinstance(parsed_json, dict):
+            db_list = parsed_json.get("databases", [])
+            
+        if not db_list:
+            raise ValueError("AI generated an empty or invalid database list.")
+
+        # 1. Build Dashboard Page
         dashboard_payload: Dict[str, Any] = {
             "parent": {"type": "page_id", "page_id": base_page_id},
             "properties": {
@@ -67,10 +76,6 @@ def provision_notion_workspace(client_name: str, schema_json: str, notion_token:
         response_data: Dict[str, Any] = res.json()
         dashboard_id: str = response_data.get("id", "")
         dashboard_url: str = response_data.get("url", "")
-        
-        db_list: List[Dict[str, Any]] = architecture.get("databases", [])
-        if not db_list:
-            raise ValueError("AI generated an empty or invalid database list.")
 
         db_name_to_real_id: Dict[str, str] = {}
         pending_relations: List[Dict[str, str]] = []
@@ -173,9 +178,11 @@ def reviewer_node(state: ArchitectState) -> Dict[str, Any]:
     
     Client requested: {state['client_request']}
     
-    Rules: 
+    CRITICAL RULES FOR APPROVAL: 
     1. Must have at least two tables. 
     2. Must be 100% valid JSON syntax.
+    3. RELATION EXCEPTION: The 'database_id' field inside relation properties MUST be the exact string name of the target database (e.g., "database_id": "Projects"). Our backend handles UUID translation later. Do NOT reject the schema for lacking UUIDs or dual_property synced names.
+    
     If it passes, reply EXACTLY with 'APPROVED'. Otherwise, detail what is missing."""
     
     response = llm.invoke([SystemMessage(content="You are a strict QA reviewer."), HumanMessage(content=prompt)])
@@ -185,7 +192,6 @@ def reviewer_node(state: ArchitectState) -> Dict[str, Any]:
         print("[QA RESULT] Schema Approved!")
         return {"final_approval": True, "review_feedback": ""}
         
-    # --- THE TELEMETRY LOG ---
     print(f"[QA REJECTION REASON] {result}")
     return {"final_approval": False, "review_feedback": result}
 
