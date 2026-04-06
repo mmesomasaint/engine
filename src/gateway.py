@@ -104,7 +104,7 @@ def run_langgraph_agent(brief_id: str) -> None:
             "data_relationships": deployment_msg,
         }).eq("id", brief_id).execute()
         
-        print(f"✅ [SUCCESS] Architecture provisioned for {company_name}")
+        print(f"[SUCCESS] Architecture provisioned for {company_name}")
         
     except Exception as e:
         error_message: str = str(e)

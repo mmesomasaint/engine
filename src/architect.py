@@ -110,11 +110,11 @@ def provision_notion_workspace(client_name: str, schema_json: str, notion_token:
 # ---------------------------------------------------------
 # GRAPH NODES
 # ---------------------------------------------------------
-def planner_node(state: ArchitectState):
+def planner_node(state: ArchitectState) -> Dict[str, Any]:
     print(f"\n--- PLANNER: Iteration {state['iteration_count']} ---")
-    feedback_context = f"\nCritique to fix:\n{state['review_feedback']}" if state.get("review_feedback") else ""
+    feedback_context: str = f"\nCritique to fix:\n{state['review_feedback']}" if state.get("review_feedback") else ""
 
-    prompt = f"""You are an elite Notion System Architect. 
+    prompt: str = f"""You are an elite Notion System Architect. 
     Design a robust, relational database architecture to solve this operational requirement:
     {state['client_request']}
     
@@ -126,24 +126,43 @@ def planner_node(state: ArchitectState):
     {feedback_context}"""
 
     response = llm.invoke([SystemMessage(content="You are an expert system architect."), HumanMessage(content=prompt)])
-    return {"current_schema": response.content, "iteration_count": state["iteration_count"] + 1}
+    
+    # --- THE MARKDOWN STRIPPER ---
+    # Forcefully remove ```json and ``` if the AI stubbornly included them
+    raw_content: str = str(response.content).strip()
+    if raw_content.startswith("```json"):
+        raw_content = raw_content[7:]
+    if raw_content.startswith("```"):
+        raw_content = raw_content[3:]
+    if raw_content.endswith("```"):
+        raw_content = raw_content[:-3]
+        
+    cleaned_schema = raw_content.strip()
 
-def reviewer_node(state: ArchitectState):
+    return {"current_schema": cleaned_schema, "iteration_count": state["iteration_count"] + 1}
+
+
+def reviewer_node(state: ArchitectState) -> Dict[str, Any]:
     print("\n--- QA REVIEWER: Inspecting Schema ---")
-    prompt = f"""You are a ruthless QA Engineer. Review this Notion JSON schema:
+    prompt: str = f"""You are a ruthless QA Engineer. Review this Notion JSON schema:
     {state['current_schema']}
+    
     Client requested: {state['client_request']}
     
     Rules: 
     1. Must have at least two tables. 
-    2. Must have valid syntax.
+    2. Must be 100% valid JSON syntax.
     If it passes, reply EXACTLY with 'APPROVED'. Otherwise, detail what is missing."""
     
     response = llm.invoke([SystemMessage(content="You are a strict QA reviewer."), HumanMessage(content=prompt)])
-    result = (str)(response.content).strip()
+    result: str = str(response.content).strip()
     
     if "APPROVED" in result:
+        print("[QA RESULT] Schema Approved!")
         return {"final_approval": True, "review_feedback": ""}
+        
+    # --- THE TELEMETRY LOG ---
+    print(f"[QA REJECTION REASON] {result}")
     return {"final_approval": False, "review_feedback": result}
 
 def executor_node(state: ArchitectState):
