@@ -101,6 +101,7 @@ def run_langgraph_agent(brief_id: str) -> None:
 
         supabase.table("operational_briefs").update({
             "status": "completed",
+            "live_notion_url": live_url,
             "data_relationships": deployment_msg,
         }).eq("id", brief_id).execute()
         
@@ -113,7 +114,7 @@ def run_langgraph_agent(brief_id: str) -> None:
         try:
             supabase.table("operational_briefs").update({
                 "status": "failed",
-                "data_relationships": f"System Error: {error_message}"
+                "data_relationships": f"System Error: {error_message}",
             }).eq("id", brief_id).execute()
         except Exception as db_fallback_error:
             print(f"[CATASTROPHIC] Failed to update database with error state: {str(db_fallback_error)}")
