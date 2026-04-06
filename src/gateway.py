@@ -95,17 +95,27 @@ def run_langgraph_agent(brief_id: str) -> None:
         if not final_state.get("final_approval"):
             raise RuntimeError("Graph Error: Agents failed to achieve architectural approval.")
         
-        # Update the Dashboard
+        # Update the dashboard
         deployment_msg: str = str(final_state.get("deployment_status", "Architecture Deployed Successfully."))
-        live_url: str = str(final_state.get("live_notion_url", "#"))
+        live_url: Optional[str] = final_state.get("live_notion_url")
 
-        supabase.table("operational_briefs").update({
-            "status": "completed",
-            "live_notion_url": live_url,
-            "data_relationships": deployment_msg,
-        }).eq("id", brief_id).execute()
-        
-        print(f"[SUCCESS] Architecture provisioned for {company_name}")
+        # If live_url is missing, the deployment failed at the Notion API level
+        if not live_url or live_url == "#":
+            supabase.table("operational_briefs").update({
+                "status": "failed",
+                "data_relationships": f"Execution Failed: {deployment_msg}",
+                "live_notion_url": None
+            }).eq("id", brief_id).execute()
+            
+            print(f"❌ [FAILED] Architecture failed during Notion API deployment for {company_name}")
+        else:
+            supabase.table("operational_briefs").update({
+                "status": "completed",
+                "data_relationships": deployment_msg,
+                "live_notion_url": live_url
+            }).eq("id", brief_id).execute()
+            
+            print(f"✅ [SUCCESS] Architecture provisioned for {company_name}")
         
     except Exception as e:
         error_message: str = str(e)

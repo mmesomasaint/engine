@@ -131,7 +131,12 @@ def provision_notion_workspace(client_name: str, schema_json: str, notion_token:
                 patch_res.raise_for_status()
 
         return {"success": True, "message": "Successfully built and mapped architecture.", "live_notion_url": dashboard_url}
-        
+
+    except requests.exceptions.HTTPError as e:
+        # THIS IS THE FIX: Read the exact rejection reason from Notion
+        error_details = e.response.text
+        print(f"[NOTION API REJECTION]: {error_details}")
+        return {"success": False, "message": f"Notion API Error: {error_details}", "live_notion_url": None} 
     except Exception as e:
         print(f"[NOTION EXECUTOR SYSTEM ERROR]: {str(e)}")
         return {"success": False, "message": str(e), "live_notion_url": None}
@@ -151,6 +156,7 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     1. Output MUST be a raw JSON array of database objects. No markdown blocks, no formatting.
     2. Properties must use Notion's strict nested objects (e.g. "Status": {{ "select": {{ "options": [...] }} }}).
     3. For relations, use the EXACT string name of the target database (e.g., "Related DB": {{ "relation": {{ "database_id": "Projects" }} }}).
+    4. PRIMARY KEY RULE: Every single database MUST contain exactly ONE property of type 'title' (e.g., "Name": {{ "title": {{}} }}). This is mandatory.
     
     {feedback_context}"""
 
