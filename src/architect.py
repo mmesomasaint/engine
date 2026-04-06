@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from dotenv import load_dotenv 
-from typing import TypedDict, Dict, Any
+from typing import TypedDict, Dict, List, Optional, cast, Any
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -35,7 +35,6 @@ class ExecutionResult(TypedDict):
 # ---------------------------------------------------------
 # THE NOTION TOOL
 # ---------------------------------------------------------
-@tool
 def provision_notion_workspace(client_name: str, schema_json: str, notion_token: str, base_page_id: str) -> ExecutionResult:
     """Executes API calls to Notion to build a custom workspace."""
     print(f"[SYSTEM ACTION] Provisioning Notion OS for {client_name}...")
@@ -192,13 +191,18 @@ def reviewer_node(state: ArchitectState) -> Dict[str, Any]:
 
 def executor_node(state: ArchitectState):
     print("\n--- EXECUTOR: Deploying API ---")
-    result = provision_notion_workspace.invoke({
-        "client_name": state["client_name"], 
-        "schema_json": state["current_schema"],
-        "notion_token": state["notion_token"], 
-        "base_page_id": state["base_page_id"] 
-    })
-    return {"deployment_status": result["message"], "live_notion_url": result["live_notion_url"]}
+
+    result: ExecutionResult = provision_notion_workspace(
+        client_name=state["client_name"], 
+        schema_json=state["current_schema"],
+        notion_token=state["notion_token"], 
+        base_page_id=state["base_page_id"] 
+    )
+    
+    return {
+        "deployment_status": str(result.get("message", "Deployed.")), 
+        "live_notion_url": result.get("live_notion_url")
+    }
 
 def should_continue(state: ArchitectState):
     if state["final_approval"]: return "executor"
