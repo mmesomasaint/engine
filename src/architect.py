@@ -157,6 +157,7 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     2. Properties must use Notion's strict nested objects (e.g. "Status": {{ "select": {{ "options": [...] }} }}).
     3. For relations, use the EXACT string name of the target database (e.g., "Related DB": {{ "relation": {{ "database_id": "Projects" }} }}).
     4. PRIMARY KEY RULE: Every single database MUST contain exactly ONE property of type 'title' (e.g., "Name": {{ "title": {{}} }}). This is mandatory.
+    COMPUTED PROPERTIES BAN: Do NOT use `formula` or `rollup` property types. The Notion API rejects these during initial creation. Use standard properties only (number, select, text, date, relation, etc.).
     
     {feedback_context}"""
 
