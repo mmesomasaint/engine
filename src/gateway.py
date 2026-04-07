@@ -50,6 +50,7 @@ def run_langgraph_agent(brief_id: str) -> None:
             
         user_id: str = str(brief.get("user_id", ""))
         company_name: str = str(brief.get("company_name", "Unknown Company"))
+        workspace_name: str = str(brief.get("workspace_name") or company_name )# We grab the workspace name, but fall back to company_name for old database rows
         bottleneck: str = str(brief.get("primary_bottleneck", ""))
         tools: str = str(brief.get("current_tools", ""))
 
@@ -77,7 +78,7 @@ def run_langgraph_agent(brief_id: str) -> None:
         print("[COMPUTE] Booting LangGraph Agents...")
         initial_state: ArchitectState = {
             "brief_id": brief_id,
-            "client_name": company_name,
+            "client_name": workspace_name,
             "client_request": client_request_formatted,
             "notion_token": notion_token,
             "base_page_id": base_page_id,
