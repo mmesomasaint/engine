@@ -145,7 +145,7 @@ def provision_notion_workspace(client_name: str, schema_json: str, notion_token:
 # GRAPH NODES
 # ---------------------------------------------------------
 def planner_node(state: ArchitectState) -> Dict[str, Any]:
-    print(f"\n--- PLANNER: Iteration {state['iteration_count']} ---")
+    print(f"\n--- PLANNER: Iteration {state['iteration_count']} ---") 
     feedback_context: str = f"\nCritique to fix:\n{state['review_feedback']}" if state.get("review_feedback") else ""
 
     prompt: str = f"""You are an elite Notion System Architect. 
@@ -218,15 +218,37 @@ def executor_node(state: ArchitectState):
         base_page_id=state["base_page_id"] 
     )
     
-    return {
-        "deployment_status": str(result.get("message", "Deployed.")), 
-        "live_notion_url": result.get("live_notion_url")
-    }
+    if result["success"]:
+        return {
+            "deployment_status": str(result.get("message", "Deployed.")), 
+            "live_notion_url": result.get("live_notion_url")
+        }
+    else:
+        # THE SELF-HEALING TRIGGER
+        error_msg = result.get("message", "Unknown API Error")
+        print(f"\n[SELF-HEALING TRIGGERED] Notion rejected the schema. Feeding error back to Planner...")
+        return {
+            "deployment_status": "failed_needs_revision",
+            "live_notion_url": None,
+            "final_approval": False, # Revoke the QA approval
+            "review_feedback": f"CRITICAL NOTION API REJECTION. You MUST fix your JSON schema. Here is the exact validation error from Notion: {error_msg}"
+        }
 
 def should_continue(state: ArchitectState):
     if state["final_approval"]: return "executor"
     if state["iteration_count"] >= 3: return END
     return "planner"
+
+# NEW: Evaluate what to do after the executor tries to deploy
+def route_after_execution(state: ArchitectState):
+    if state.get("live_notion_url"): 
+        return END # Success! The URL exists.
+        
+    # If deployment failed, but we still have iterations left, loop back to the AI
+    if state["iteration_count"] < 4: 
+        return "planner"
+        
+    return END # We tried too many times, fail gracefully.
 
 # ---------------------------------------------------------
 # COMPILE GRAPH
@@ -239,6 +261,8 @@ workflow.add_node("executor", executor_node)
 workflow.set_entry_point("planner")
 workflow.add_edge("planner", "reviewer")
 workflow.add_conditional_edges("reviewer", should_continue)
-workflow.add_edge("executor", END)
+
+# add_conditional_edges preferred to add_edge  
+workflow.add_conditional_edges("executor", route_after_execution) 
 
 architect_app = workflow.compile()
