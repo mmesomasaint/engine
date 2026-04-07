@@ -154,13 +154,17 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     
     CRITICAL RULES:
     1. Output MUST be a raw JSON array of database objects. No markdown blocks, no formatting.
-    2. STRICT NESTED PROPERTIES: The property type MUST be the key, and its value MUST be an object (even if empty).
-       ✅ CORRECT: "Department": {{ "select": {{ "options": [{{ "name": "HR", "color": "blue" }}] }} }}
-       ✅ CORRECT: "Notes": {{ "rich_text": {{}} }}
-       ✅ CORRECT: "Deadline": {{ "date": {{}} }}
-       ✅ CORRECT: "Is Active": {{ "checkbox": {{}} }}
-       ❌ WRONG: "Department": {{}}
-       ❌ WRONG: "Department": "select"
+    2. STRICT NESTED PROPERTIES: You MUST use this exact structural template for properties. The property type is the key, and its value is an object.
+    TEMPLATE EXAMPLES:
+    "Name": {{ "title": {{}} }}
+    "Status": {{ "status": {{ "options": [] }} }}
+    "Category": {{ "select": {{ "options": [] }} }}
+    "Tags": {{ "multi_select": {{ "options": [] }} }}
+    "Notes": {{ "rich_text": {{}} }}
+    "Deadline": {{ "date": {{}} }}
+    "Is Active": {{ "checkbox": {{}} }}
+    "Amount": {{ "number": {{ "format": "dollar" }} }}
+    NEVER output an empty object like "Role": {{}} or a string like "Role": "select".
     3. For relations, use the EXACT string name of the target database (e.g., "Related DB": {{ "relation": {{ "database_id": "Projects" }} }}).
     4. PRIMARY KEY RULE: Every single database MUST contain exactly ONE property of type 'title' (e.g., "Name": {{ "title": {{}} }}). This is mandatory.
     COMPUTED PROPERTIES BAN: Do NOT use `formula` or `rollup` property types. The Notion API rejects these during initial creation. Use standard properties only (number, select, text, date, relation, etc.).
