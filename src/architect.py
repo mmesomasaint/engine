@@ -153,8 +153,11 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     {state['client_request']}
     
     CRITICAL RULES:
-    1. Output MUST be a raw JSON array of database objects. No markdown blocks, no formatting.
-    2. STRICT NESTED PROPERTIES: You MUST use this exact structural template for properties. The property type is the key, and its value is an object.
+    1. STRICT ROOT STRUCTURE: Output MUST be a raw JSON array of database objects. EVERY database object MUST have exactly two root keys: "name" (the title of the database) and "properties" (the schema).
+       ✅ CORRECT: [{{ "name": "Employees", "properties": {{ ... }} }}]
+       ❌ WRONG: [{{ "properties": {{ ... }} }}]
+    2. Output MUST be a raw JSON array of database objects. No markdown blocks, no formatting.
+    3. STRICT NESTED PROPERTIES: You MUST use this exact structural template for properties. The property type is the key, and its value is an object.
     TEMPLATE EXAMPLES:
     "Name": {{ "title": {{}} }}
     "Status": {{ "status": {{ "options": [] }} }}
@@ -165,8 +168,8 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     "Is Active": {{ "checkbox": {{}} }}
     "Amount": {{ "number": {{ "format": "dollar" }} }}
     NEVER output an empty object like "Role": {{}} or a string like "Role": "select".
-    3. For relations, use the EXACT string name of the target database (e.g., "Related DB": {{ "relation": {{ "database_id": "Projects" }} }}).
-    4. PRIMARY KEY RULE: Every single database MUST contain exactly ONE property of type 'title' (e.g., "Name": {{ "title": {{}} }}). This is mandatory.
+    4. For relations, use the EXACT string name of the target database (e.g., "Related DB": {{ "relation": {{ "database_id": "Projects" }} }}).
+    5. PRIMARY KEY RULE: Every single database MUST contain exactly ONE property of type 'title' (e.g., "Name": {{ "title": {{}} }}). This is mandatory.
     COMPUTED PROPERTIES BAN: Do NOT use `formula` or `rollup` property types. The Notion API rejects these during initial creation. Use standard properties only (number, select, text, date, relation, etc.).
     
     {feedback_context}"""
