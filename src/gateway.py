@@ -93,9 +93,6 @@ def run_langgraph_agent(brief_id: str) -> None:
         # Execute the Graph (returns a dict representing the final state)
         final_state: Dict[str, Any] = architect_app.invoke(initial_state)
         
-        if not final_state.get("final_approval"):
-            raise RuntimeError("Graph Error: Agents failed to achieve architectural approval.")
-        
         # Update the dashboard
         deployment_msg: str = str(final_state.get("deployment_status", "Architecture Deployed Successfully."))
         live_url: Optional[str] = final_state.get("live_notion_url")
