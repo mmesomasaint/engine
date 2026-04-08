@@ -174,7 +174,18 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     
     {feedback_context}"""
 
-    response = llm.invoke([SystemMessage(content="You are an expert system architect."), HumanMessage(content=prompt)])
+    # --- THE LLM RETRY SHIELD ---
+    response = None
+    for attempt in range(3):
+        try:
+            response = llm.invoke([SystemMessage(content="You are an expert system architect."), HumanMessage(content=prompt)])
+            break # If successful, break out of the loop
+        except Exception as e:
+            error_msg = str(e)
+            print(f"⚠️ [GEMINI BUSY] Attempt {attempt + 1}/3 failed: {error_msg}")
+            if attempt == 2: # If it's the 3rd strike, crash gracefully
+                raise Exception("AI agent is currently down. Please try again later.")
+            time.sleep(5) # Wait 5 seconds before knocking on Google's door again
     
     # --- THE MARKDOWN STRIPPER ---
     # Forcefully remove ```json and ``` if the AI stubbornly included them
@@ -205,7 +216,18 @@ def reviewer_node(state: ArchitectState) -> Dict[str, Any]:
     
     If it passes, reply EXACTLY with 'APPROVED'. Otherwise, detail what is missing."""
     
-    response = llm.invoke([SystemMessage(content="You are a strict QA reviewer."), HumanMessage(content=prompt)])
+    # --- THE LLM RETRY SHIELD ---
+    response = None
+    for attempt in range(3):
+        try:
+            response = llm.invoke([SystemMessage(content="You are a strict QA reviewer."), HumanMessage(content=prompt)])
+            break
+        except Exception as e:
+            print(f"⚠️ [GEMINI BUSY] QA Attempt {attempt + 1}/3 failed. Retrying in 5s...")
+            if attempt == 2:
+                raise Exception("Gemini API is currently down.")
+            time.sleep(5)
+    
     result: str = str(response.content).strip()
     
     if "APPROVED" in result:
