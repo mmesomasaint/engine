@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import requests
 from dotenv import load_dotenv 
@@ -175,7 +176,7 @@ def planner_node(state: ArchitectState) -> Dict[str, Any]:
     {feedback_context}"""
 
     # --- THE LLM RETRY SHIELD ---
-    response = None
+    response: Any = None
     for attempt in range(3):
         try:
             response = llm.invoke([SystemMessage(content="You are an expert system architect."), HumanMessage(content=prompt)])
@@ -217,7 +218,7 @@ def reviewer_node(state: ArchitectState) -> Dict[str, Any]:
     If it passes, reply EXACTLY with 'APPROVED'. Otherwise, detail what is missing."""
     
     # --- THE LLM RETRY SHIELD ---
-    response = None
+    response: Any = None
     for attempt in range(3):
         try:
             response = llm.invoke([SystemMessage(content="You are a strict QA reviewer."), HumanMessage(content=prompt)])
