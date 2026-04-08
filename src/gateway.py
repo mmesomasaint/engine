@@ -50,7 +50,7 @@ def run_langgraph_agent(brief_id: str) -> None:
             
         user_id: str = str(brief.get("user_id", ""))
         company_name: str = str(brief.get("company_name", "Unknown Company"))
-        workspace_name: str = str(brief.get("workspace_name") or company_name )# We grab the workspace name, but fall back to company_name for old database rows
+        workspace_name: str = str(brief.get("workspace_name") or company_name ) # We grab the workspace name, but fall back to company_name for old database rows
         bottleneck: str = str(brief.get("primary_bottleneck", ""))
         tools: str = str(brief.get("current_tools", ""))
 
@@ -105,7 +105,7 @@ def run_langgraph_agent(brief_id: str) -> None:
                 "live_notion_url": None
             }).eq("id", brief_id).execute()
             
-            print(f"❌ [FAILED] Architecture failed during Notion API deployment for {company_name}")
+            print(f"[FAILED] Architecture failed during Notion API deployment for {company_name}")
         else:
             supabase.table("operational_briefs").update({
                 "status": "completed",
@@ -113,7 +113,7 @@ def run_langgraph_agent(brief_id: str) -> None:
                 "live_notion_url": live_url
             }).eq("id", brief_id).execute()
             
-            print(f"✅ [SUCCESS] Architecture provisioned for {company_name}")
+            print(f"[SUCCESS] Architecture provisioned for {company_name}")
         
     except Exception as e:
         error_message: str = str(e)
